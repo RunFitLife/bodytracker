@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Run Fit Life - Composición corporal</title>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  margin: 0;
+  background: #f6f8fa;
+  color: #333;
+}
+header {
+  background: #2e8b57;
+  color: white;
+  text-align: center;
+  padding: 28px 10px;
+}
+header h1 { margin: 0; font-size: 2.3em; }
+header h2 { margin-top: 6px; font-weight: 400; }
+
+main {
+  max-width: 960px;
+  margin: auto;
+  padding: 18px;
+}
+
+h3 { color: #2e8b57; margin-top: 32px; }
+
+.card, form {
+  background: white;
+  padding: 18px;
+  border-radius: 14px;
+  box-shadow: 0 4px 10px rgba(0,0,0,.08);
+}
+
+form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px,1fr));
+  gap: 10px;
+}
+
+input, select, button {
+  padding: 10px;
+  font-size: 1em;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+}
+
+button {
+  background: #2e8b57;
+  color: white;
+  border: none;
+}
+
+button:hover { opacity: .9; }
+
+.warning { background: #ff6b6b; }
+.danger { background: #c0392b; }
+.export { background: #1e90ff; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 14px;
+  background: white;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 4px 10px rgba(0,0,0,.08);
+}
+
+th, td {
+  padding: 11px;
+  text-align: center;
+  border-bottom: 1px solid #eee;
+}
+
+th { background: #f1f1f1; }
+tr.actual { background: #e6f4ec; }
+
+tr.year {
+  background: #f1f1f1;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.flex {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+canvas {
+  margin-top: 18px;
+  background: white;
+  border-radius: 14px;
+  padding: 12px;
+  box-shadow: 0 4px 10px rgba(0,0,0,.08);
+}
+</style>
+</head>
+
+<body>
+
+<header>
+  <h1>Run Fit Life</h1>
+  <h2>Composición corporal</h2>
+</header>
+
+<main>
+
+<h3>Registro mensual</h3>
+<form id="form">
+  <input type="month" id="fecha" required>
+  <input type="number" step="0.001" id="peso" placeholder="Peso (kg)">
+  <input type="number" step="0.001" id="agua" placeholder="Agua (kg)">
+  <input type="number" step="0.001" id="musculo" placeholder="Músculo (kg)">
+  <input type="number" step="0.001" id="grasa" placeholder="Grasa (kg)">
+  <input type="number" step="0.001" id="hueso" placeholder="Hueso (kg)">
+  <input type="number" step="0.001" id="sinGrasa" placeholder="Sin grasa (kg)">
+  <input type="number" step="0.001" id="grasaVisceral" placeholder="Grasa visceral">
+  <button type="submit">Guardar</button>
+</form>
+
+<h3>Mes actual</h3>
+<div id="actual" class="card"></div>
+
+<h3>Historial</h3>
+<table>
+<thead>
+<tr>
+<th>Mes</th><th>Peso</th><th>Agua</th><th>Músculo</th>
+<th>Grasa</th><th>Hueso</th><th>Sin grasa</th><th>Grasa visceral</th>
+</tr>
+</thead>
+<tbody id="tabla"></tbody>
+</table>
+
+<h3>Comparar meses</h3>
+<div class="flex">
+<select id="m1"></select>
+<select id="m2"></select>
+<button onclick="comparar()">Comparar</button>
+</div>
+<div id="comparacion" class="card"></div>
+
+<h3>Evolución (peso)</h3>
+<canvas id="grafica" height="140"></canvas>
+
+<h3>Opciones</h3>
+<div class="flex">
+<select id="mesBorrar"></select>
+<button class="warning" onclick="borrarMes()">Borrar mes</button>
+<button class="danger" onclick="borrarTodo()">Borrar todo</button>
+<button class="export" onclick="exportar()">Exportar a Excel</button>
+</div>
+
+</main>
+
+<script>
+let chart;
+const campos = ["peso","agua","musculo","grasa","hueso","sinGrasa","grasaVisceral"];
+const etiquetas = {
+  peso: "Peso",
+  agua: "Agua",
+  musculo: "Músculo",
+  grasa: "Grasa",
+  hueso: "Hueso",
+  sinGrasa: "Sin grasa",
+  grasaVisceral: "Grasa visceral"
+};
+
+const f = v => v === "" || v == null ? "" : parseFloat(v).toString();
+const get = () => JSON.parse(localStorage.getItem("runfitlife")) || [];
+const set = d => localStorage.setItem("runfitlife", JSON.stringify(d));
+
+form.addEventListener("submit", e => {
+  e.preventDefault();
+  const nuevo = { fecha: fecha.value };
+  campos.forEach(c => nuevo[c] = document.getElementById(c).value);
+  let datos = get().filter(d => d.fecha !== nuevo.fecha);
+  datos.push(nuevo);
+  datos.sort((a,b)=>a.fecha.localeCompare(b.fecha));
+  set(datos);
+  form.reset();
+  render();
+});
+
+function render() {
+  const datos = get();
+  tabla.innerHTML = "";
+  if (!datos.length) {
+    actual.innerHTML = "Sin datos todavía.";
+    return;
+  }
+
+  const ultimo = datos[datos.length - 1];
+  const añoActual = ultimo.fecha.substring(0,4);
+
+  // Mes actual
+  actual.innerHTML = `<strong>${ultimo.fecha}</strong><br>
+    ${campos.map(c=>`${etiquetas[c]}: ${f(ultimo[c])}`).join(" | ")}`;
+
+  // Selectores
+  [m1,m2,mesBorrar].forEach(s=>{
+    s.innerHTML = datos.map(d=>`<option>${d.fecha}</option>`).join("");
+  });
+
+  // Agrupar por año
+  const ordenados = [...datos].sort((a,b)=>b.fecha.localeCompare(a.fecha));
+  const grupos = {};
+  ordenados.forEach(d=>{
+    const año = d.fecha.substring(0,4);
+    if (!grupos[año]) grupos[año] = [];
+    grupos[año].push(d);
+  });
+
+  Object.keys(grupos).forEach(año=>{
+    const abierto = año === añoActual;
+
+    // Fila del año
+    tabla.innerHTML += `
+      <tr class="year" onclick="toggleAño('${año}')">
+        <td colspan="8">${abierto ? "▼" : "▶"} ${año} (${grupos[año].length} meses)</td>
+      </tr>
+    `;
+
+    // Filas de meses
+    grupos[año].forEach(d=>{
+      tabla.innerHTML += `
+        <tr class="month-of-${año}" style="display:${abierto ? "" : "none"}">
+          <td>${d.fecha}</td>
+          ${campos.map(c=>`<td>${f(d[c])}</td>`).join("")}
+        </tr>
+      `;
+    });
+  });
+
+  // Gráfica
+  if (chart) chart.destroy();
+  chart = new Chart(grafica,{
+    type:"line",
+    data:{
+      labels:datos.map(d=>d.fecha),
+      datasets:[{
+        label:"Peso",
+        data:datos.map(d=>d.peso),
+        borderColor:"#2e8b57",
+        fill:false
+      }]
+    }
+  });
+}
+
+function toggleAño(año) {
+  const filas = document.querySelectorAll(`.month-of-${año}`);
+  if(!filas.length) return;
+  const abierto = filas[0].style.display !== "none";
+  filas.forEach(f => f.style.display = abierto ? "none" : "");
+  const trAño = filas[0].previousElementSibling;
+  trAño.firstElementChild.textContent =
+    `${abierto ? "▶" : "▼"} ${trAño.firstElementChild.textContent.slice(2)}`;
+}
+
+function comparar() {
+  const datos = get();
+  const a = datos.find(d=>d.fecha===m1.value);
+  const b = datos.find(d=>d.fecha===m2.value);
+  let html = `<strong>${m1.value} → ${m2.value}</strong><ul>`;
+  campos.forEach(c=>{
+    const dif = (b[c]-a[c]).toFixed(3);
+    html += `<li>${etiquetas[c]}: ${f(a[c])} → ${f(b[c])} (${f(dif)})</li>`;
+  });
+  html += "</ul>";
+  comparacion.innerHTML = html;
+}
+
+function borrarMes() {
+  if (!confirm("¿Borrar este mes?")) return;
+  set(get().filter(d=>d.fecha!==mesBorrar.value));
+  render();
+}
+
+function borrarTodo() {
+  if (!confirm("¿Borrar TODOS los datos?")) return;
+  localStorage.removeItem("runfitlife");
+  location.reload();
+}
+
+function exportar() {
+  const datos = get();
+  if (!datos.length) return;
+  let csv = "Mes," + campos.map(c=>etiquetas[c]).join(",") + "\n";
+  datos.forEach(d=>{
+    csv += d.fecha + "," + campos.map(c=>d[c]).join(",") + "\n";
+  });
+  const blob = new Blob([csv],{type:"text/csv"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "Run_Fit_Life_Composición_Corporal.csv";
+  a.click();
+}
+
+render();
+</script>
+
+</body>
+</html>
